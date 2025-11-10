@@ -67,9 +67,9 @@ def eclat(prefix, items, min_support, frequent_itemsets):
             eclat(new_itemset, suffix, min_support, frequent_itemsets)
 
 
-item_tidset = generate_tidsets_from_dataset("datasets/chess.dat")
+# item_tidset = generate_tidsets_from_dataset("datasets/chess.dat")
 
-# item_tidset = generate_tidsets(transactions)
+item_tidset = generate_tidsets(transactions)
 #
 # for item, tidset in item_tidset.items():
 #     print(item, ':', sorted(tidset), '\n')
@@ -77,7 +77,8 @@ item_tidset = generate_tidsets_from_dataset("datasets/chess.dat")
 # tri croissant (par ordre du nombre de transactions)
 
 # 20 %
-min_support = math.floor(get_dataset_length("datasets/chess.dat") * 0.2)
+# min_support = math.floor(get_dataset_length("datasets/chess.dat") * 0.2)
+min_support = 2
 
 items = sorted(item_tidset.items(), key=lambda x: len(x[1]))
 # print('\n', items)

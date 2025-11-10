@@ -1,28 +1,34 @@
 """
-Implémentation améliorée de l'algorithme ECLAT
-pour l'extraction de motifs fréquents
+Implémentation optimisée de l'algorithme ECLAT
+Focus sur la performance et la consommation mémoire réduite
 """
 
 from collections import defaultdict
 from typing import Dict, Set, List, Tuple
 import time
+import argparse
+import sys
+import gc
 
 class ECLATMiner:
-    def __init__(self, min_support: float = 0.2):
+    def __init__(self, min_support: float = 0.2, verbose: bool = True):
         """
         Initialise le mineur ECLAT
         
         Args:
             min_support: Support minimum (en pourcentage, ex: 0.2 pour 20%)
+            verbose: Afficher les informations de progression
         """
         self.min_support_ratio = min_support
         self.min_support_count = 0
         self.nb_transactions = 0
-        self.frequent_itemsets = {}
+        self.nb_frequent_itemsets = 0
+        self.verbose = verbose
         
     def load_dataset(self, filepath: str) -> Dict[str, Set[int]]:
         """
         Charge un dataset et génère les tidsets (format vertical)
+        Optimisé pour réduire la consommation mémoire
         
         Args:
             filepath: Chemin vers le fichier dataset
@@ -32,41 +38,51 @@ class ECLATMiner:
         """
         item_tidset = defaultdict(set)
         
-        with open(filepath, 'r') as file:
-            for tid, line in enumerate(file):
-                # Nettoie la ligne et split par espace
-                items = line.strip().split()
-                for item in items:
-                    if item:  # Ignore les chaînes vides
-                        item_tidset[item].add(tid)
-        
-        self.nb_transactions = tid + 1  # Nombre total de transactions
-        self.min_support_count = int(self.nb_transactions * self.min_support_ratio)
-        
-        print(f"Dataset chargé: {self.nb_transactions} transactions")
-        print(f"Support minimum: {self.min_support_count} ({self.min_support_ratio*100}%)")
-        print(f"Nombre d'items distincts: {len(item_tidset)}")
-        
+        try:
+            with open(filepath, 'r') as file:
+                for tid, line in enumerate(file):
+                    items = line.strip().split()
+                    for item in items:
+                        if item:
+                            item_tidset[item].add(tid)
+            
+            self.nb_transactions = tid + 1
+            self.min_support_count = int(self.nb_transactions * self.min_support_ratio)
+            
+            if self.verbose:
+                print(f"Dataset: {filepath}")
+                print(f"Transactions: {self.nb_transactions}")
+                print(f"Items distincts: {len(item_tidset)}")
+                print(f"Support minimum: {self.min_support_count} ({self.min_support_ratio*100:.1f}%)")
+                
+        except FileNotFoundError:
+            print(f"ERREUR: Fichier '{filepath}' introuvable", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"ERREUR lors de la lecture du fichier: {e}", file=sys.stderr)
+            sys.exit(1)
+            
         return item_tidset
     
-    def eclat_recursive(self, prefix: List[str], items: List[Tuple[str, Set[int]]]):
+    def eclat_recursive(self, prefix: Tuple[str, ...], items: List[Tuple[str, Set[int]]]):
         """
-        Fonction récursive ECLAT
+        Fonction récursive ECLAT optimisée pour la mémoire
+        - Utilise des tuples au lieu de listes pour le préfixe (moins de mémoire)
+        - Ne stocke pas tous les itemsets, juste le compteur
+        - Libère la mémoire des tidsets dès que possible
         
         Args:
-            prefix: Préfixe de l'itemset courant
+            prefix: Préfixe de l'itemset courant (tuple immutable)
             items: Liste de tuples (item, tidset) à explorer
         """
-        for i, (item, tidset) in enumerate(items):
+        for i in range(len(items)):
+            item, tidset = items[i]
             support = len(tidset)
             
-            # Si le support est suffisant
             if support >= self.min_support_count:
-                # Créer le nouvel itemset
-                new_itemset = prefix + [item]
-                self.frequent_itemsets[frozenset(new_itemset)] = support
+                self.nb_frequent_itemsets += 1
                 
-                # Construire le suffix en intersectant avec les items suivants
+                # Construire le suffix avec intersection
                 suffix = []
                 for j in range(i + 1, len(items)):
                     other_item, other_tidset = items[j]
@@ -75,28 +91,35 @@ class ECLATMiner:
                     if len(intersection) >= self.min_support_count:
                         suffix.append((other_item, intersection))
                 
-                # Appel récursif si le suffix n'est pas vide
+                # Appel récursif si suffix non vide
                 if suffix:
-                    self.eclat_recursive(new_itemset, suffix)
+                    new_prefix = prefix + (item,)
+                    self.eclat_recursive(new_prefix, suffix)
+                    
+                # Libérer la mémoire du suffix
+                del suffix
     
-    def mine(self, filepath: str) -> Dict[frozenset, int]:
+    def mine(self, filepath: str) -> int:
         """
         Lance l'extraction des motifs fréquents
+        Retourne uniquement le nombre d'itemsets (pas les itemsets eux-mêmes)
         
         Args:
             filepath: Chemin vers le dataset
             
         Returns:
-            Dictionnaire {itemset -> support}
+            Nombre d'itemsets fréquents trouvés
         """
-        print(f"\n{'='*60}")
-        print(f"Démarrage de l'algorithme ECLAT")
-        print(f"{'='*60}\n")
+        if self.verbose:
+            print(f"\n{'='*70}")
+            print(f"Algorithme ECLAT - Benchmark de performance")
+            print(f"{'='*70}\n")
         
         start_time = time.time()
         
         # Charger le dataset
         item_tidset = self.load_dataset(filepath)
+        load_time = time.time() - start_time
         
         # Filtrer les items qui ne respectent pas le support minimum
         frequent_1_itemsets = [
@@ -105,98 +128,110 @@ class ECLATMiner:
             if len(tidset) >= self.min_support_count
         ]
         
-        print(f"Items fréquents (1-itemsets): {len(frequent_1_itemsets)}")
+        # Libérer la mémoire de item_tidset
+        del item_tidset
+        gc.collect()
+        
+        if self.verbose:
+            print(f"Items fréquents (1-itemsets): {len(frequent_1_itemsets)}")
+            print(f"Temps de chargement: {load_time:.3f}s\n")
+            print(f"Extraction en cours...")
         
         # Trier par support croissant (optimisation)
         frequent_1_itemsets.sort(key=lambda x: len(x[1]))
         
-        # Initialiser le dictionnaire des itemsets fréquents
-        self.frequent_itemsets = {}
-        
-        # Ajouter les 1-itemsets fréquents
-        for item, tidset in frequent_1_itemsets:
-            self.frequent_itemsets[frozenset([item])] = len(tidset)
+        # Compter les 1-itemsets
+        self.nb_frequent_itemsets = len(frequent_1_itemsets)
         
         # Lancer ECLAT
-        print(f"\nExtraction des motifs fréquents en cours...")
-        self.eclat_recursive([], frequent_1_itemsets)
+        mining_start = time.time()
+        self.eclat_recursive((), frequent_1_itemsets)
+        mining_time = time.time() - mining_start
         
-        elapsed_time = time.time() - start_time
+        total_time = time.time() - start_time
         
-        print(f"\n{'='*60}")
-        print(f"Extraction terminée en {elapsed_time:.2f} secondes")
-        print(f"Nombre total d'itemsets fréquents: {len(self.frequent_itemsets)}")
-        print(f"{'='*60}\n")
-        
-        return self.frequent_itemsets
-    
-    def print_results(self, max_itemsets: int = 50, sort_by_size: bool = True):
-        """
-        Affiche les résultats
-        
-        Args:
-            max_itemsets: Nombre maximum d'itemsets à afficher
-            sort_by_size: Si True, trie par taille d'itemset puis par support
-        """
-        if not self.frequent_itemsets:
-            print("Aucun itemset fréquent trouvé.")
-            return
-        
-        # Statistiques par taille
-        itemsets_by_size = defaultdict(int)
-        for itemset in self.frequent_itemsets.keys():
-            itemsets_by_size[len(itemset)] += 1
-        
-        print("Distribution des itemsets par taille:")
-        for size in sorted(itemsets_by_size.keys()):
-            print(f"  {size}-itemsets: {itemsets_by_size[size]}")
-        
-        print(f"\n{'='*60}")
-        print(f"Top {max_itemsets} itemsets fréquents:")
-        print(f"{'='*60}\n")
-        
-        # Trier les itemsets
-        if sort_by_size:
-            sorted_itemsets = sorted(
-                self.frequent_itemsets.items(),
-                key=lambda x: (-len(x[0]), -x[1], sorted(list(x[0])))
-            )
+        if self.verbose:
+            print(f"\n{'='*70}")
+            print(f"RÉSULTATS")
+            print(f"{'='*70}")
+            print(f"Itemsets fréquents trouvés: {self.nb_frequent_itemsets}")
+            print(f"Temps de chargement: {load_time:.3f}s")
+            print(f"Temps d'extraction: {mining_time:.3f}s")
+            print(f"Temps total: {total_time:.3f}s")
+            print(f"{'='*70}\n")
         else:
-            sorted_itemsets = sorted(
-                self.frequent_itemsets.items(),
-                key=lambda x: -x[1]
-            )
+            # Mode compact pour benchmarking
+            print(f"{filepath},{self.min_support_ratio},{self.nb_frequent_itemsets},{total_time:.3f}")
         
-        # Afficher les résultats
-        for i, (itemset, support) in enumerate(sorted_itemsets[:max_itemsets], 1):
-            support_pct = (support / self.nb_transactions) * 100
-            items_str = '{' + ', '.join(sorted(list(itemset))) + '}'
-            print(f"{i:3d}. {items_str:<40} => support: {support:5d} ({support_pct:5.2f}%)")
-        
-        if len(self.frequent_itemsets) > max_itemsets:
-            print(f"\n... et {len(self.frequent_itemsets) - max_itemsets} autres itemsets")
+        return self.nb_frequent_itemsets
 
 
-# ============================================================================
-# Exemple d'utilisation
-# ============================================================================
+def main():
+    """
+    Point d'entrée principal avec arguments en ligne de commande
+    """
+    parser = argparse.ArgumentParser(
+        description='ECLAT Algorithm - Frequent Itemset Mining',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Exemples d'utilisation:
+  python eclat.py datasets/chess.dat 0.2
+  python eclat.py datasets/retail.dat 0.01
+  python eclat.py datasets/chess.dat 0.3 --quiet
+  python eclat.py datasets/retail.dat 0.005 -q
+
+Le mode --quiet affiche: dataset,support,nb_itemsets,temps(s)
+        """
+    )
+    
+    parser.add_argument(
+        'dataset',
+        type=str,
+        help='Chemin vers le fichier dataset'
+    )
+    
+    parser.add_argument(
+        'min_support',
+        type=float,
+        help='Support minimum (entre 0 et 1, ex: 0.2 pour 20%%)'
+    )
+    
+    parser.add_argument(
+        '-q', '--quiet',
+        action='store_true',
+        help='Mode silencieux (affiche uniquement les résultats en CSV)'
+    )
+    
+    parser.add_argument(
+        '--timeout',
+        type=int,
+        default=1800,
+        help='Timeout en secondes (défaut: 1800s = 30min)'
+    )
+    
+    args = parser.parse_args()
+    
+    # Validation du support
+    if not 0 < args.min_support <= 1:
+        print("ERREUR: Le support minimum doit être entre 0 et 1", file=sys.stderr)
+        sys.exit(1)
+    
+    # Header CSV pour mode quiet
+    if args.quiet:
+        print("dataset,min_support,nb_itemsets,time_seconds")
+    
+    # Exécuter ECLAT
+    try:
+        miner = ECLATMiner(min_support=args.min_support, verbose=not args.quiet)
+        miner.mine(args.dataset)
+        
+    except KeyboardInterrupt:
+        print("\n\nInterruption par l'utilisateur", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"\nERREUR: {e}", file=sys.stderr)
+        sys.exit(1)
+
 
 if __name__ == "__main__":
-    # Test avec le dataset chess
-    print("=" * 80)
-    print("TEST AVEC LE DATASET CHESS")
-    print("=" * 80)
-    
-    miner_chess = ECLATMiner(min_support=0.2)
-    frequent_itemsets_chess = miner_chess.mine("datasets/chess.dat")
-    miner_chess.print_results(max_itemsets=30)
-    
-    # Test avec le dataset retail (décommentez si vous avez le fichier)
-    # print("\n\n")
-    # print("=" * 80)
-    # print("TEST AVEC LE DATASET RETAIL")
-    # print("=" * 80)
-    # 
-    # miner_retail = ECLATMiner(min_support=0.01)  # Support plus faible pour retail
-    # frequent_itemsets_retail = miner_retail.mine("datasets/retail.dat")
-    # miner_retail.print_results(max_itemsets=30)
+    main()
