@@ -7,3 +7,6 @@ A naive one and another, improved.
 https://www.philippe-fournier-viger.com/spmf/index.php?link=algorithms.php
 http://fimi.uantwerpen.be/src/
 https://borgelt.net/eclat.html
+
+---
+Naive version in eclat.py 
